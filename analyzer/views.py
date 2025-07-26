@@ -2,11 +2,16 @@
 import requests
 import PyPDF2
 import docx
+import os
+from datetime import datetime
 from django.shortcuts import render, redirect
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.models import User
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.http import FileResponse
+import io
+from django.conf import settings
 
 # Home page view
 def home_view(request):
@@ -27,6 +32,27 @@ def extract_text_from_docx(file):
 
 from django.contrib.auth.decorators import login_required
 
+def generate_report(analysis_result, resume_file_name, job_desc):
+    """Generate a formatted text report from the analysis results."""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    report = f"""RESUME ANALYSIS REPORT
+Generated on: {timestamp}
+Resume Analyzed: {resume_file_name}
+
+{'='*50}
+
+"""
+    if job_desc:
+        report += "ANALYSIS WITH JOB DESCRIPTION\n"
+    else:
+        report += "GENERAL RESUME ANALYSIS\n"
+    
+    report += f"{'='*50}\n\n"
+    report += analysis_result
+    
+    return report
+
 @login_required(login_url='login')
 def analyze_resume_view(request):
     if request.method == 'POST' and request.FILES.get('resume_file'):
@@ -44,11 +70,51 @@ def analyze_resume_view(request):
         # Call Ollama for analysis, passing job description if provided
         analysis_result = call_ollama_api(resume_text, job_desc)
 
-        # Render the results page
-        return render(request, 'results.html', {'analysis': analysis_result})
+        # Generate the report
+        report_text = generate_report(analysis_result, resume_file.name, job_desc)
+        
+        # Create a text file in memory
+        report_file = io.StringIO()
+        report_file.write(report_text)
+        report_file.seek(0)
+
+        # Convert to BytesIO for response
+        report_bytes = io.BytesIO(report_file.getvalue().encode('utf-8'))
+        
+        # Generate filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"resume_analysis_{timestamp}.txt"
+
+        # Store the report and filename in session for download
+        request.session['report_data'] = report_text
+        request.session['report_filename'] = filename
+
+        # Render the results page with both analysis and download option
+        return render(request, 'results.html', {
+            'analysis': analysis_result,
+            'has_report': True,
+            'filename': filename
+        })
 
     # If it's a GET request, just show the upload form
     return render(request, 'upload.html')
+
+@login_required(login_url='login')
+def download_report(request):
+    """View to handle report downloads"""
+    report_data = request.session.get('report_data')
+    filename = request.session.get('report_filename')
+    
+    if not report_data or not filename:
+        messages.error(request, 'No report found to download.')
+        return redirect('analyze_resume')
+    
+    # Create the response with the report data
+    report_file = io.StringIO(report_data)
+    report_bytes = io.BytesIO(report_file.getvalue().encode('utf-8'))
+    
+    response = FileResponse(report_bytes, as_attachment=True, filename=filename)
+    return response
 
 # Login view
 def login_view(request):
@@ -93,13 +159,40 @@ def call_ollama_api(resume_text, job_desc=None):
     url = "http://localhost:11434/api/generate"
     if job_desc:
         prompt = f"""
-        You are an expert HR analyst. Analyze the following resume text in the context of the provided job description and provide a professional evaluation.
-        Structure your response with these sections:
-        1. **Professional Summary**: A brief, powerful summary of the candidate's profile.
-        2. **Key Strengths**: List the top 3-5 skills and strengths relevant to the job description.
-        3. **Areas for Improvement**: Constructive feedback on how to make the resume stronger for this job.
-        4. **Job Match Analysis**: How well does the resume match the job description? What gaps exist?
+        You are an expert ATS (Applicant Tracking System) analyzer. Perform a detailed analysis of how well the resume matches the provided job description.
+        
+        Structure your response in the following format:
 
+        1. **Match Score**:
+           - Provide a percentage (0-100%) indicating overall resume match with job requirements
+           - Break down match scores by key requirements
+
+        2. **Skills Analysis**:
+           - List skills found in both resume and job description
+           - List required skills missing from the resume
+           - List additional relevant skills in resume not mentioned in job description
+
+        3. **Experience Alignment**:
+           - Analyze how well the candidate's experience matches job requirements
+           - Highlight specific experiences that directly relate to job requirements
+           - Identify any experience gaps
+
+        4. **Keywords Match**:
+           - List important keywords from job description found in resume
+           - List critical keywords missing from resume
+           - Suggestions for keyword optimization
+
+        5. **Improvement Recommendations**:
+           - Specific suggestions to better align resume with this job
+           - Key areas to highlight or modify
+           - Skills to add or emphasize
+
+        6. **Overall Assessment**:
+           - Clear statement if the candidate appears qualified
+           - Main strengths for this specific role
+           - Major gaps or concerns
+
+        Analyze based on this data:
         ---
         **RESUME TEXT:**
         {resume_text}
@@ -107,6 +200,8 @@ def call_ollama_api(resume_text, job_desc=None):
         **JOB DESCRIPTION:**
         {job_desc}
         ---
+
+        Provide a data-driven, objective analysis focusing on concrete matches and gaps between the resume and job requirements.
         """
     else:
         prompt = f"""
@@ -123,7 +218,7 @@ def call_ollama_api(resume_text, job_desc=None):
         """
 
     payload = {
-        "model": "llama3.2:1b",
+        "model": "llama3",
         "prompt": prompt,
         "stream": False
     }
