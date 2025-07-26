@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Resume Editor & Suggestions</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background: linear-gradient(120deg, #6a11cb 0%, #2575fc 100%); min-height: 100vh; }
+        .card { border-radius: 18px; }
+        .suggestion-card { background: #e3f2fd; border: none; }
+        .edit-card { background: #fff3cd; border: none; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-light bg-light">
+      <div class="container-fluid">
+        <a class="navbar-brand" href="/">Resume Analyzer</a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+          <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarNav">
+          <ul class="navbar-nav ms-auto">
+            {% if user.is_authenticated %}
+              <li class="nav-item">
+                <a class="nav-link" href="{% url 'analyze' %}">Analyze</a>
+              </li>
+              <li class="nav-item">
+                <a class="nav-link" href="{% url 'logout' %}">Logout</a>
+              </li>
+            {% else %}
+              <li class="nav-item">
+                <a class="nav-link" href="{% url 'login' %}">Login</a>
+              </li>
+              <li class="nav-item">
+                <a class="nav-link" href="{% url 'register' %}">Register</a>
+              </li>
+            {% endif %}
+          </ul>
+        </div>
+      </div>
+    </nav>
+    <div class="container d-flex align-items-center justify-content-center" style="min-height: 100vh;">
+        <div class="card shadow-lg p-4 w-100" style="max-width: 500px;">
+            <div class="text-center mb-3">
+                <img src="https://img.icons8.com/color/96/000000/edit-file.png" alt="Resume Edit" style="width: 64px; height: 64px;"/>
+                <h2 class="mt-2" style="font-weight: 700; color: #2575fc;">Resume Editor & Suggestions</h2>
+            </div>
+            <form method="post" enctype="multipart/form-data">
+                {% csrf_token %}
+                <div class="mb-3">
+                    <label for="resume" class="form-label">Upload your resume (PDF or DOCX)</label>
+                    <input class="form-control" type="file" id="resume" name="resume_file" required>
+                </div>
+                <button type="submit" class="btn btn-primary w-100">Get Suggestions</button>
+            </form>
+            {% if suggestions %}
+            <div class="suggestion-card card mt-4">
+                <div class="card-header fw-bold text-primary">Suggestions to Improve Your Resume</div>
+                <div class="card-body"><div style="white-space: pre-wrap;">{{ suggestions }}</div></div>
+            </div>
+            {% endif %}
+            {% if edit_text %}
+            <div class="edit-card card mt-3">
+                <div class="card-header fw-bold text-warning">Suggested Resume Edits</div>
+                <div class="card-body"><div style="white-space: pre-wrap;">{{ edit_text }}</div></div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>

@@ -1,6 +1,4 @@
-# Home page view
-def home_view(request):
-    return render(request, 'home.html')
+# Resume Edit & Suggestion View
 import requests
 import PyPDF2
 import docx
@@ -8,6 +6,11 @@ from django.shortcuts import render, redirect
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.models import User
 from django.contrib import messages
+from django.contrib.auth.decorators import login_required
+
+# Home page view
+def home_view(request):
+    return render(request, 'home.html')
 
 # Helper function to extract text from a PDF file
 def extract_text_from_pdf(file):
@@ -113,3 +116,64 @@ def call_ollama_api(resume_text):
         return response.json().get('response', 'Could not get a valid response.')
     except requests.exceptions.RequestException as e:
         return f"Error connecting to Ollama: {e}. Please ensure Ollama is running."
+
+@login_required(login_url='login')
+def resume_edit_view(request):
+    suggestions = None
+    edit_text = None
+    if request.method == 'POST' and request.FILES.get('resume_file'):
+        resume_file = request.FILES['resume_file']
+        if resume_file.name.endswith('.pdf'):
+            resume_text = extract_text_from_pdf(resume_file)
+        elif resume_file.name.endswith('.docx'):
+            resume_text = extract_text_from_docx(resume_file)
+        else:
+            return render(request, 'resume_edit.html', {'error': 'Unsupported file type.'})
+
+        # Call Ollama for suggestions and edits
+        ollama_response = call_ollama_edit_api(resume_text)
+        suggestions = ollama_response.get('suggestions', '')
+        edit_text = ollama_response.get('edit_text', '')
+
+    return render(request, 'resume_edit.html', {
+        'suggestions': suggestions,
+        'edit_text': edit_text,
+    })
+
+# Helper for edit API
+def call_ollama_edit_api(resume_text):
+    url = "http://localhost:11434/api/generate"
+    prompt = f"""
+    You are an expert resume editor. Analyze the following resume text and:
+    1. Suggest specific improvements and edits to make the resume stronger (output as 'Suggestions').
+    2. Provide a revised version of the resume text with your suggested edits (output as 'Edited Resume').
+
+    ---
+    RESUME TEXT:
+    {resume_text}
+    ---
+    Format your response as:
+    Suggestions:
+    ...
+    Edited Resume:
+    ...
+    """
+    payload = {
+        "model": "llama3.2:1b",
+        "prompt": prompt,
+        "stream": False
+    }
+    try:
+        response = requests.post(url, json=payload)
+        response.raise_for_status()
+        raw = response.json().get('response', '')
+        # Parse response
+        import re
+        suggestions_match = re.search(r'Suggestions:\s*(.*?)(?:Edited Resume:|$)', raw, re.DOTALL | re.IGNORECASE)
+        edit_match = re.search(r'Edited Resume:\s*(.*)', raw, re.DOTALL | re.IGNORECASE)
+        return {
+            'suggestions': suggestions_match.group(1).strip() if suggestions_match else '',
+            'edit_text': edit_match.group(1).strip() if edit_match else '',
+        }
+    except requests.exceptions.RequestException as e:
+        return {'suggestions': f'Error connecting to Ollama: {e}', 'edit_text': ''}
