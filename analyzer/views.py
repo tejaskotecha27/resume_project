@@ -1,0 +1,115 @@
+# Home page view
+def home_view(request):
+    return render(request, 'home.html')
+import requests
+import PyPDF2
+import docx
+from django.shortcuts import render, redirect
+from django.contrib.auth import authenticate, login, logout
+from django.contrib.auth.models import User
+from django.contrib import messages
+
+# Helper function to extract text from a PDF file
+def extract_text_from_pdf(file):
+    text = ""
+    reader = PyPDF2.PdfReader(file)
+    for page in reader.pages:
+        text += page.extract_text() or ""
+    return text
+
+# Helper function to extract text from a DOCX file
+def extract_text_from_docx(file):
+    doc = docx.Document(file)
+    return "\n".join([para.text for para in doc.paragraphs])
+
+from django.contrib.auth.decorators import login_required
+
+@login_required(login_url='login')
+def analyze_resume_view(request):
+    if request.method == 'POST' and request.FILES.get('resume_file'):
+        resume_file = request.FILES['resume_file']
+        
+        # Extract text based on file extension
+        if resume_file.name.endswith('.pdf'):
+            resume_text = extract_text_from_pdf(resume_file)
+        elif resume_file.name.endswith('.docx'):
+            resume_text = extract_text_from_docx(resume_file)
+        else:
+            return render(request, 'upload.html', {'error': 'Unsupported file type.'})
+        
+        # Call Ollama for analysis (function to be created in the next step)
+        analysis_result = call_ollama_api(resume_text)
+        
+        # Render the results page
+        return render(request, 'results.html', {'analysis': analysis_result})
+
+    # If it's a GET request, just show the upload form
+    return render(request, 'upload.html')
+
+# Login view
+def login_view(request):
+    if request.method == 'POST':
+        username = request.POST.get('username')
+        password = request.POST.get('password')
+        user = authenticate(request, username=username, password=password)
+        if user is not None:
+            login(request, user)
+            return redirect('home')
+        else:
+            messages.error(request, 'Invalid username or password.')
+    return render(request, 'login.html')
+
+# Logout view
+def logout_view(request):
+    logout(request)
+    return render(request, 'logout.html')
+
+# Register view
+def register_view(request):
+    if request.method == 'POST':
+        username = request.POST.get('username')
+        email = request.POST.get('email')
+        password1 = request.POST.get('password1')
+        password2 = request.POST.get('password2')
+        if password1 != password2:
+            messages.error(request, 'Passwords do not match.')
+        elif User.objects.filter(username=username).exists():
+            messages.error(request, 'Username already exists.')
+        elif User.objects.filter(email=email).exists():
+            messages.error(request, 'Email already registered.')
+        else:
+            user = User.objects.create_user(username=username, email=email, password=password1)
+            login(request, user)
+            return redirect('home')
+    return render(request, 'register.html')
+
+# (Add this function to the same views.py file)
+
+def call_ollama_api(resume_text):
+    url = "http://localhost:11434/api/generate"
+    
+    prompt = f"""
+    You are an expert HR analyst. Analyze the following resume text and provide a professional evaluation. 
+    Structure your response with these sections:
+    1.  **Professional Summary**: A brief, powerful summary of the candidate's profile.
+    2.  **Key Strengths**: List the top 3-5 skills and strengths.
+    3.  **Areas for Improvement**: Constructive feedback on how to make the resume stronger.
+
+    ---
+    **RESUME TEXT:**
+    {resume_text}
+    ---
+    """
+
+    payload = {
+        "model": "llama3.2:1b",  # Make sure this model is running in Ollama
+        "prompt": prompt,
+        "stream": False
+    }
+
+    try:
+        response = requests.post(url, json=payload)
+        response.raise_for_status()
+        return response.json().get('response', 'Could not get a valid response.')
+    except requests.exceptions.RequestException as e:
+        return f"Error connecting to Ollama: {e}. Please ensure Ollama is running."
