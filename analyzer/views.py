@@ -29,9 +29,14 @@ from django.contrib.auth.decorators import login_required
 
 @login_required(login_url='login')
 def analyze_resume_view(request):
+
     if request.method == 'POST' and request.FILES.get('resume_file'):
         resume_file = request.FILES['resume_file']
         job_desc = request.POST.get('job_desc', '').strip()
+
+        # Require job description
+        if not job_desc:
+            return render(request, 'upload.html', {'error': 'Job description is required.'})
 
         # Extract text based on file extension
         if resume_file.name.endswith('.pdf'):
@@ -41,7 +46,7 @@ def analyze_resume_view(request):
         else:
             return render(request, 'upload.html', {'error': 'Unsupported file type.'})
 
-        # Call Ollama for analysis, passing job description if provided
+        # Always compare resume with job description
         analysis_result = call_ollama_api(resume_text, job_desc)
 
         # Render the results page
@@ -93,12 +98,14 @@ def call_ollama_api(resume_text, job_desc=None):
     url = "http://localhost:11434/api/generate"
     if job_desc:
         prompt = f"""
-        You are an expert HR analyst. Analyze the following resume text in the context of the provided job description and provide a professional evaluation.
+        You are an expert HR analyst. Compare the following resume text with the provided job description.
+        If the resume matches the job description well, provide a detailed analysis based on the match.
+        If the resume does NOT match the job description, clearly state that the job description does not match the resume and explain the gaps.
         Structure your response with these sections:
         1. **Professional Summary**: A brief, powerful summary of the candidate's profile.
         2. **Key Strengths**: List the top 3-5 skills and strengths relevant to the job description.
         3. **Areas for Improvement**: Constructive feedback on how to make the resume stronger for this job.
-        4. **Job Match Analysis**: How well does the resume match the job description? What gaps exist?
+        4. **Job Match Analysis**: Clearly state if the resume matches the job description or not, and explain why.
 
         ---
         **RESUME TEXT:**
