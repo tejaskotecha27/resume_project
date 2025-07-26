@@ -31,7 +31,8 @@ from django.contrib.auth.decorators import login_required
 def analyze_resume_view(request):
     if request.method == 'POST' and request.FILES.get('resume_file'):
         resume_file = request.FILES['resume_file']
-        
+        job_desc = request.POST.get('job_desc', '').strip()
+
         # Extract text based on file extension
         if resume_file.name.endswith('.pdf'):
             resume_text = extract_text_from_pdf(resume_file)
@@ -39,10 +40,10 @@ def analyze_resume_view(request):
             resume_text = extract_text_from_docx(resume_file)
         else:
             return render(request, 'upload.html', {'error': 'Unsupported file type.'})
-        
-        # Call Ollama for analysis (function to be created in the next step)
-        analysis_result = call_ollama_api(resume_text)
-        
+
+        # Call Ollama for analysis, passing job description if provided
+        analysis_result = call_ollama_api(resume_text, job_desc)
+
         # Render the results page
         return render(request, 'results.html', {'analysis': analysis_result})
 
@@ -88,28 +89,44 @@ def register_view(request):
 
 # (Add this function to the same views.py file)
 
-def call_ollama_api(resume_text):
+def call_ollama_api(resume_text, job_desc=None):
     url = "http://localhost:11434/api/generate"
-    
-    prompt = f"""
-    You are an expert HR analyst. Analyze the following resume text and provide a professional evaluation. 
-    Structure your response with these sections:
-    1.  **Professional Summary**: A brief, powerful summary of the candidate's profile.
-    2.  **Key Strengths**: List the top 3-5 skills and strengths.
-    3.  **Areas for Improvement**: Constructive feedback on how to make the resume stronger.
+    if job_desc:
+        prompt = f"""
+        You are an expert HR analyst. Analyze the following resume text in the context of the provided job description and provide a professional evaluation.
+        Structure your response with these sections:
+        1. **Professional Summary**: A brief, powerful summary of the candidate's profile.
+        2. **Key Strengths**: List the top 3-5 skills and strengths relevant to the job description.
+        3. **Areas for Improvement**: Constructive feedback on how to make the resume stronger for this job.
+        4. **Job Match Analysis**: How well does the resume match the job description? What gaps exist?
 
-    ---
-    **RESUME TEXT:**
-    {resume_text}
-    ---
-    """
+        ---
+        **RESUME TEXT:**
+        {resume_text}
+        ---
+        **JOB DESCRIPTION:**
+        {job_desc}
+        ---
+        """
+    else:
+        prompt = f"""
+        You are an expert HR analyst. Analyze the following resume text and provide a professional evaluation.
+        Structure your response with these sections:
+        1. **Professional Summary**: A brief, powerful summary of the candidate's profile.
+        2. **Key Strengths**: List the top 3-5 skills and strengths.
+        3. **Areas for Improvement**: Constructive feedback on how to make the resume stronger.
+
+        ---
+        **RESUME TEXT:**
+        {resume_text}
+        ---
+        """
 
     payload = {
-        "model": "llama3.2:1b",  # Make sure this model is running in Ollama
+        "model": "llama3.2:1b",
         "prompt": prompt,
         "stream": False
     }
-
     try:
         response = requests.post(url, json=payload)
         response.raise_for_status()
