@@ -176,7 +176,7 @@ def call_ollama_edit_api(resume_text):
     ...
     """
     payload = {
-        "model": "llama3.2:1b",
+        "model": "llama3",
         "prompt": prompt,
         "stream": False
     }
